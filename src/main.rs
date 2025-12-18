@@ -133,6 +133,7 @@ fn main() {
 
     // чтение информация из STREAMINFO
     // собираю значения из байт массива согласно докам
+    // TODO: переписать на from_be_bytes где возможно
     let min_block_size = ((streaminfo[0] as u16) << 8) | (streaminfo[1] as u16);
     let max_block_size = ((streaminfo[2] as u16) << 8) | (streaminfo[3] as u16);
     let min_frame_size = (streaminfo[4] as u32) << 16 | (streaminfo[5] as u32) << 8 | (streaminfo[6] as u32);
@@ -185,14 +186,16 @@ fn main() {
         let mut buffer = vec![0u8; length as usize];
         file.read_exact(&mut buffer).unwrap();
 
-        if block_type == 6 {
-            // обработка блока картинки
-            process_picture_block(buffer);
+        match block_type {
+            6_u8 => {
+                // обработка блока картинки
+                process_picture_block(buffer);
+            }
+            _ => {}
         }
 
         if is_last {
             break;
         }
     }
-
 }
