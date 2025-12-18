@@ -1,8 +1,9 @@
 #![warn(clippy::all, clippy::pedantic)]
 
 use std::fs::File;
-use std::io::{self, Cursor, Read};
+use std::io::{self, BufReader, Cursor, Read};
 
+use bitstream_io::{BigEndian, BitRead, BitReader};
 use image::ImageReader;
 
 
@@ -198,4 +199,34 @@ fn main() {
             break;
         }
     }
+
+    // открытие битового ридера для чтения аудио фреймов из буфера файла
+    let mut reader = BitReader::endian(BufReader::new(file), BigEndian);
+
+    // чтение синхронизирующего кода из аудио фрейма
+    // 14 бит
+    // всегда должно быть 0x3FFE
+    let sync_code = reader.read::<14, u16>().unwrap();
+    if sync_code != 0x3FFE { // 0x3FFE это 11111111111110 в хексе
+        panic!("Потеряна синхронизация!");
+    }
+
+    // 1 бит
+    // должен быть 0
+    let reserved = reader.read::<1, u8>().unwrap();
+    // 1 бит
+    // 0 — фиксированный, 1 — переменный
+    let blocking_strategy = reader.read::<1, u8>().unwrap();
+    // 4 бита
+    // код размера блока
+    let block_size = reader.read::<4, u8>().unwrap();
+    // 4 бита
+    // код частоты дискретизации
+    let sample_rate = reader.read::<4, u8>().unwrap();
+
+    println!("Sync code: {:X}", sync_code);
+    println!("Reserved: {}", reserved);
+    println!("Blocking strategy: {}", blocking_strategy);
+    println!("Block size: {}", block_size);
+    println!("Sample rate: {}", sample_rate);
 }
