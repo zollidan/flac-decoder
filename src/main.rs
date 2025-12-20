@@ -1,7 +1,7 @@
 #![warn(clippy::all, clippy::pedantic)]
 
 use std::fs::File;
-use std::io::{self, BufReader, Cursor, Read};
+use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom};
 
 use bitstream_io::{BigEndian, BitRead, BitReader};
 use image::ImageReader;
@@ -140,6 +140,41 @@ fn process_picture_block(picture_block: Vec<u8>) {
 
 }
 
+fn process_metadata(file: &mut File) -> io::Result<()> {
+    // скип остальных блоков метаданных
+    /*
+    0	Streaminfo
+    1	Padding
+    2	Application
+    3	Seek table
+    4	Vorbis comment
+    5	Cuesheet
+    6	Picture
+    */
+    loop {
+        let (is_last, block_type, length) = get_header(file);
+
+        // пока работает только обработка блока картинки
+        match block_type {
+            // блок картинки
+            6 => {
+                let mut buffer = vec![0u8; length as usize];
+                file.read_exact(&mut buffer)?;
+                process_picture_block(buffer);
+            }
+            _ => {
+                // пропускаем остальные блоки
+                file.seek(SeekFrom::Current(length as i64))?;
+            }
+        }
+
+        if is_last {
+            break;
+        }
+    }
+    Ok(())
+}
+
 fn main() {
     let path = "song.flac";
 
@@ -195,34 +230,7 @@ fn main() {
 
     println!("{:#?}", steam_info);
 
-    // скип остальных блоков метаданных
-    // кроме блока картинки
-    /*
-    0	Streaminfo
-    1	Padding
-    2	Application
-    3	Seek table
-    4	Vorbis comment
-    5	Cuesheet
-    6	Picture
-    */
-    loop {
-        let (is_last, block_type, length) = get_header(&mut file);
-        let mut buffer = vec![0u8; length as usize];
-        file.read_exact(&mut buffer).unwrap();
-
-        match block_type {
-            6_u8 => {
-                // обработка блока картинки
-                process_picture_block(buffer);
-            }
-            _ => {}
-        }
-
-        if is_last {
-            break;
-        }
-    }
+    process_metadata(&mut file).unwrap();
 
     // открытие битового ридера для чтения аудио фреймов из буфера файла
     let mut reader = BitReader::endian(BufReader::new(file), BigEndian);
