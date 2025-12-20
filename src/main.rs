@@ -9,6 +9,31 @@ use image::ImageReader;
 
 // docs : https://www.rfc-editor.org/rfc/rfc9639.html#name-examples
 
+#[derive(Debug)]
+struct StreamInfo {
+    min_block_size: u16,
+    max_block_size: u16,
+    min_frame_size: u32,
+    max_frame_size: u32,
+    sample_rate: u64,
+    channels: u8,
+    bps: u8,
+    total_samples: u64,
+    checksum_combined: [u8; 16],
+}
+
+#[derive(Debug)]
+struct PictureBlock{
+    picture_type: u32,
+    media_type: String,
+    description_length: u32,
+    width: u32,
+    height: u32,
+    color_depth: u32,
+    colors_used: u32,
+    picture_data_length: u32,
+}
+
 fn check_flac_header(file: &mut File) -> io::Result<()> {
     let mut format_part = [0u8; 4];
     file.read_exact(&mut format_part)?;
@@ -41,8 +66,6 @@ fn get_header(file: &mut File) -> (bool, u8, u32) {
 
 // получение и сохранение картинки из метаданных
 fn process_picture_block(picture_block: Vec<u8>) {
-    println!("Total picture block size: {}", picture_block.len());
-    println!("First 32 bytes: {:?}", &picture_block[0..32.min(picture_block.len())]);
 
     let mut step = 0;
 
@@ -100,15 +123,19 @@ fn process_picture_block(picture_block: Vec<u8>) {
                 println!("Failed to read image dimensions: {}", e);
         }
     }
-    
-    println!("Picture type: {}", picture_type);
-    println!("Media type: {:?}", media_type);
-    println!("Description length: {}", description_length);
-    println!("Width: {}", width);
-    println!("Height: {}", height);
-    println!("Color depth: {}", color_depth);
-    println!("Colors used: {}", colors_used);
-    println!("Picture data length: {}", picture_data_length);
+
+    let picture = PictureBlock{
+        picture_type,
+        media_type: media_type.to_string(),
+        description_length,
+        width,
+        height,
+        color_depth,
+        colors_used,
+        picture_data_length,
+    };
+
+    println!("{:#?}", picture);
 
 
 }
@@ -135,21 +162,14 @@ fn main() {
     // чтение информация из STREAMINFO
     // собираю значения из байт массива согласно докам
     // TODO: переписать на from_be_bytes где возможно
-    let min_block_size = ((streaminfo[0] as u16) << 8) | (streaminfo[1] as u16);
-    let max_block_size = ((streaminfo[2] as u16) << 8) | (streaminfo[3] as u16);
-    let min_frame_size = (streaminfo[4] as u32) << 16 | (streaminfo[5] as u32) << 8 | (streaminfo[6] as u32);
-    let max_frame_size = (streaminfo[7] as u32) << 16 | (streaminfo[8] as u32) << 8 | (streaminfo[9] as u32);
+    let min_block_size = u16::from_be_bytes(streaminfo[0..2].try_into().unwrap());
+    let max_block_size = u16::from_be_bytes(streaminfo[2..4].try_into().unwrap());
+    let min_frame_size = u32::from_be_bytes([0, streaminfo[4], streaminfo[5], streaminfo[6]]);
+    let max_frame_size = u32::from_be_bytes([0, streaminfo[7], streaminfo[8], streaminfo[9]]);
     // беру сразу 8 байт с 10 по 17 и комбинирую в одно 64 битное число
     // так как дальше идут значения которые занимают биты в этих байтах
     // так удобнее всего двигаться внутри байтов 
-    let combinated = (streaminfo[10] as u64) << 56 | 
-                            (streaminfo[11] as u64) << 48 | 
-                            (streaminfo[12] as u64) << 40 | 
-                            (streaminfo[13] as u64) << 32 |
-                            (streaminfo[14] as u64) << 24 |
-                            (streaminfo[15] as u64) << 16 |
-                            (streaminfo[16] as u64) << 8 |
-                            (streaminfo[17] as u64);
+    let combinated = u64::from_be_bytes(streaminfo[10..18].try_into().unwrap());
     // получение 16 байт контрольной суммы MD5
     let checksum_combined: [u8; 16] = streaminfo[18..34].try_into().unwrap();
     // так как значение занимает 20 то сдвигаю на 12 бита вправо от 32 и маской беру 20 бит
@@ -161,17 +181,22 @@ fn main() {
     // все что осталось забираю маской 
     let total_samples = combinated & 0xFFFFFFFFF; // 36 bit
 
-    println!("Min block size: {}", min_block_size);
-    println!("Max block size: {}", max_block_size);
-    println!("Min frame size: {}", min_frame_size);
-    println!("Max frame size: {}", max_frame_size);
-    println!("Sample rate: {}", sample_rate);
-    println!("Channels: {}", channels + 1);
-    println!("Bits per sample: {}", bps + 1);
-    println!("Total samples: {}", total_samples);
-    println!("MD5 checksum: {:x?}", checksum_combined);
+    let steam_info = StreamInfo {
+        min_block_size,
+        max_block_size,
+        min_frame_size,
+        max_frame_size,
+        sample_rate,
+        channels: channels as u8 + 1,
+        bps: bps as u8 + 1,
+        total_samples,
+        checksum_combined,
+    };
+
+    println!("{:#?}", steam_info);
 
     // скип остальных блоков метаданных
+    // кроме блока картинки
     /*
     0	Streaminfo
     1	Padding
@@ -183,7 +208,6 @@ fn main() {
     */
     loop {
         let (is_last, block_type, length) = get_header(&mut file);
-        println!("is_last: {}, Block type: {}, length: {}", is_last, block_type, length);
         let mut buffer = vec![0u8; length as usize];
         file.read_exact(&mut buffer).unwrap();
 
