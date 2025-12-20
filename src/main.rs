@@ -6,6 +6,29 @@ use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom};
 use bitstream_io::{BigEndian, BitRead, BitReader};
 use image::ImageReader;
 
+#[derive(Debug)]
+struct FrameHeader {
+    sync_code: u16,
+    reserved: u8,
+    blocking_strategy: u8,
+    block_size_further_down: u8,
+    sample_rate: u8,
+    stereo_mode: u8,
+    bit_depth: u8,
+    mandatory: u8,
+    frame_number: u8,
+    block_size: u8,
+    frame_header_crc: u8,
+}
+
+struct Frame {
+    header: FrameHeader,
+    subframes: Vec<Subframe>,
+}
+
+struct Subframe {
+    // данные субфрейма
+}
 
 // docs : https://www.rfc-editor.org/rfc/rfc9639.html#name-examples
 
@@ -235,6 +258,7 @@ fn main() {
     // открытие битового ридера для чтения аудио фреймов из буфера файла
     let mut reader = BitReader::endian(BufReader::new(file), BigEndian);
 
+    // КОД ПОД ПРИМЕР ПЕРЕДЕЛАТЬ
     // чтение синхронизирующего кода из аудио фрейма
     // 14 бит
     // всегда должно быть 0x3FFE
@@ -251,14 +275,43 @@ fn main() {
     let blocking_strategy = reader.read::<1, u8>().unwrap();
     // 4 бита
     // код размера блока
-    let block_size = reader.read::<4, u8>().unwrap();
+    let block_size_further_down = reader.read::<4, u8>().unwrap();
     // 4 бита
     // код частоты дискретизации
     let sample_rate = reader.read::<4, u8>().unwrap();
+    // 4 бита
+    // стерео без декореляции
+    let stereo_mode = reader.read::<4, u8>().unwrap();
+    // 3 бита
+    // битовая глубина
+    let bit_depth = reader.read::<3, u8>().unwrap();
+    // 1 бит
+    // должен быть 0
+    let mandatory = reader.read::<1, u8>().unwrap();
+    // 1 байт
+    // номер фрейма
+    let frame_number = reader.read::<8, u8>().unwrap();
+    // 1 байт
+    // размер блока
+    let block_size = reader.read::<8, u8>().unwrap();
+    // 1 байт
+    // CRC-8 заголовка фрейма
+    let frame_header_crc = reader.read::<8, u8>().unwrap();
 
-    println!("Sync code: {:X}", sync_code);
-    println!("Reserved: {}", reserved);
-    println!("Blocking strategy: {}", blocking_strategy);
-    println!("Block size: {}", block_size);
-    println!("Sample rate: {}", sample_rate);
+
+    let frame_header = FrameHeader {
+        sync_code,
+        reserved,
+        blocking_strategy,
+        block_size_further_down,
+        sample_rate,
+        stereo_mode,
+        bit_depth,
+        mandatory,
+        frame_number,
+        block_size,
+        frame_header_crc,
+    };
+
+    println!("{:#?}", frame_header);
 }
