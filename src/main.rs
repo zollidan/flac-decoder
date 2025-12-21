@@ -6,19 +6,122 @@ use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom};
 use bitstream_io::{BigEndian, BitRead, BitReader};
 use image::ImageReader;
 
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum BitDepth {
+    FromStreamInfo, // 0b000
+    Bits8,          // 0b001
+    Bits12,         // 0b010
+    Reserved,       // 0b011
+    Bits16,         // 0b100
+    Bits20,         // 0b101
+    Bits24,         // 0b110
+    Bits32,         // 0b111
+}
+
+impl BitDepth {
+    pub fn from_u8(value: u8) -> Self {
+        match value & 0x07 {
+            0b000 => Self::FromStreamInfo,
+            0b001 => Self::Bits8,
+            0b010 => Self::Bits12,
+            0b100 => Self::Bits16,
+            0b101 => Self::Bits20,
+            0b110 => Self::Bits24,
+            0b111 => Self::Bits32,
+            _ => Self::Reserved,
+        }
+    }
+
+    pub fn bits(&self) -> Option<u8> {
+        match self {
+            Self::Bits8 => Some(8),
+            Self::Bits12 => Some(12),
+            Self::Bits16 => Some(16),
+            Self::Bits20 => Some(20),
+            Self::Bits24 => Some(24),
+            Self::Bits32 => Some(32),
+            _ => None,
+        }
+    }
+}
+
+// поменять потом на расширеную версию с количеством каналов
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum ChannelAssignment {
+    Independent(u8),    // 0b0000-0b0111 от 1 до 8 независимых каналов
+    LeftSideStereo,     // 0b1000: Left + Side
+    SideRightStereo,    // 0b1001: Side + Right
+    MidSideStereo,      // 0b1010: Mid + Side
+    Reserved,           // 0b1011-0b1111
+}
+
+impl ChannelAssignment {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            v @ 0..=7 => Self::Independent(v + 1),
+            0b1000 => Self::LeftSideStereo,
+            0b1001 => Self::SideRightStereo,
+            0b1010 => Self::MidSideStereo,
+            _ => Self::Reserved,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum SampleRate {
+    FromStreamInfo, // 0b0000
+    KHz88_2,        // 0b0001
+    KHz176_4,       // 0b0010
+    KHz192,         // 0b0011
+    KHz8,           // 0b0100
+    KHz16,          // 0b0101
+    KHz22_05,       // 0b0110
+    KHz24,          // 0b0111
+    KHz32,          // 0b1000
+    KHz44_1,        // 0b1001
+    KHz48,          // 0b1010
+    KHz96,          // 0b1011
+    Uncommon8bit,   // 0b1100
+    Uncommon16bit,  // 0b1101
+    Uncommon16bitDiv10, // 0b1110
+    Forbidden,      // 0b1111
+}
+
+impl SampleRate {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            0b0000 => Self::FromStreamInfo,
+            0b0001 => Self::KHz88_2,
+            0b0010 => Self::KHz176_4,
+            0b0011 => Self::KHz192,
+            0b0100 => Self::KHz8,
+            0b0101 => Self::KHz16,
+            0b0110 => Self::KHz22_05,
+            0b0111 => Self::KHz24,
+            0b1000 => Self::KHz32,
+            0b1001 => Self::KHz44_1,
+            0b1010 => Self::KHz48,
+            0b1011 => Self::KHz96,
+            0b1100 => Self::Uncommon8bit,
+            0b1101 => Self::Uncommon16bit,
+            0b1110 => Self::Uncommon16bitDiv10,
+            _ => Self::Forbidden,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct FrameHeader {
     sync_code: u16,
-    reserved: u8,
     blocking_strategy: u8,
-    block_size_further_down: u8,
-    sample_rate: u8,
-    stereo_mode: u8,
-    bit_depth: u8,
+    block_size_code: u8,
+    sample_rate_code: SampleRate,
+    channel_assignment: ChannelAssignment,
+    bit_depth: BitDepth,
     mandatory: u8,
-    frame_number: u8,
+    frame_or_sample_number: u64, 
     block_size: u8,
-    frame_header_crc: u8,
+    crc8: u8,
 }
 
 struct Frame {
@@ -258,30 +361,26 @@ fn main() {
     // открытие битового ридера для чтения аудио фреймов из буфера файла
     let mut reader = BitReader::endian(BufReader::new(file), BigEndian);
 
-    // КОД ПОД ПРИМЕР ПЕРЕДЕЛАТЬ
+    
     // чтение синхронизирующего кода из аудио фрейма
-    // 14 бит
-    // всегда должно быть 0x3FFE
-    let sync_code = reader.read::<14, u16>().unwrap();
-    if sync_code != 0x3FFE { // 0x3FFE это 11111111111110 в хексе
-        panic!("Потеряна синхронизация!");
-    }
+    // 15 бит
+    // всегда должно быть 0b111111111111100
+    let sync_code = reader.read::<15, u16>().expect("Sync error");
+    if sync_code != 0x7FFC { panic!("Lost sync"); }
 
     // 1 бит
-    // должен быть 0
-    let reserved = reader.read::<1, u8>().unwrap();
-    // 1 бит
     // 0 — фиксированный, 1 — переменный
+    // не должен меняться в пределах файла
     let blocking_strategy = reader.read::<1, u8>().unwrap();
     // 4 бита
     // код размера блока
-    let block_size_further_down = reader.read::<4, u8>().unwrap();
+    let block_size_code = reader.read::<4, u8>().unwrap();
     // 4 бита
     // код частоты дискретизации
     let sample_rate = reader.read::<4, u8>().unwrap();
     // 4 бита
-    // стерео без декореляции
-    let stereo_mode = reader.read::<4, u8>().unwrap();
+    // вариант каналов
+    let channel_assignment = reader.read::<4, u8>().unwrap();
     // 3 бита
     // битовая глубина
     let bit_depth = reader.read::<3, u8>().unwrap();
@@ -298,19 +397,17 @@ fn main() {
     // CRC-8 заголовка фрейма
     let frame_header_crc = reader.read::<8, u8>().unwrap();
 
-
     let frame_header = FrameHeader {
         sync_code,
-        reserved,
         blocking_strategy,
-        block_size_further_down,
-        sample_rate,
-        stereo_mode,
-        bit_depth,
+        block_size_code,
+        sample_rate_code: SampleRate::from_u8(sample_rate),
+        channel_assignment: ChannelAssignment::from_u8(channel_assignment),
+        bit_depth: BitDepth::from_u8(bit_depth),
         mandatory,
-        frame_number,
+        frame_or_sample_number: frame_number as u64,
         block_size,
-        frame_header_crc,
+        crc8: frame_header_crc,
     };
 
     println!("{:#?}", frame_header);
