@@ -2,11 +2,13 @@
 
 // docs : https://www.rfc-editor.org/rfc/rfc9639.html#name-examples
 
+use std::env;
 use std::fs::File;
 use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom};
 
 use bitstream_io::{BigEndian, BitRead, BitReader};
-use image::ImageReader;
+
+mod picture;
 
 #[derive(Debug)]
 pub struct FrameHeader {
@@ -42,18 +44,6 @@ pub struct StreamInfo {
     pub bps: u8,
     pub total_samples: u64,
     pub checksum_combined: [u8; 16],
-}
-
-#[derive(Debug)]
-pub struct PictureBlock {
-    pub picture_type: u32,
-    pub media_type: String,
-    pub description_length: u32,
-    pub width: u32,
-    pub height: u32,
-    pub color_depth: u32,
-    pub colors_used: u32,
-    pub picture_data_length: u32,
 }
 
 // функция для чтения переменной длины UTF-8 закодированного u64
@@ -108,9 +98,9 @@ fn check_flac_header(file: &mut File) -> io::Result<()> {
     Ok(())
 }
 
-fn get_header(file: &mut File) -> (bool, u8, u32) {
+fn get_header(file: &mut File) -> Result<(bool, u8, u32), std::io::Error> {
     let mut header = [0u8; 4];
-    file.read_exact(&mut header);
+    file.read_exact(&mut header)?;
 
     // побитовая операция
     // первый бит 0 или 1 если 0 то это не последний блок метаданных
@@ -123,83 +113,7 @@ fn get_header(file: &mut File) -> (bool, u8, u32) {
     // сдвигаю первый байт на 16 бит влево, второй на 8 бит и добавляю третий
     let length = ((header[1] as u32) << 16) | ((header[2] as u32) << 8) | (header[3] as u32);
 
-    (is_last, block_type, length)
-}
-
-// получение и сохранение картинки из метаданных
-fn process_picture_block(picture_block: Vec<u8>) {
-    let mut step = 0;
-
-    let picture_type = u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
-    step += 4;
-
-    let media_type_length = u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
-    step += 4;
-
-    let media_type =
-        std::str::from_utf8(&picture_block[step..step + media_type_length as usize]).unwrap();
-    step += media_type_length as usize;
-
-    let description_length = u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
-    step += 4;
-    step += description_length as usize;
-
-    let mut width = u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
-    step += 4;
-    let mut height = u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
-    step += 4;
-    let color_depth = u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
-    step += 4;
-    let colors_used = u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
-    step += 4;
-    let picture_data_length = u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
-    step += 4;
-    let picture_data = &picture_block[step..step + picture_data_length as usize];
-
-    // сохранение картинки в файл
-    let file_name = format!(
-        "picture_{}.{}",
-        picture_type,
-        match media_type {
-            "image/jpeg" => "jpg",
-            "image/png" => "png",
-            _ => "bin",
-        }
-    );
-
-    let cursor = Cursor::new(picture_data);
-
-    match ImageReader::new(cursor).with_guessed_format() {
-        Ok(reader) => match reader.decode() {
-            Ok(image) => {
-                if width == 0 || height == 0 {
-                    width = image.width();
-                    height = image.height();
-                }
-                match image.save(&file_name) {
-                    Ok(_) => println!("Saved picture to {}", file_name),
-                    Err(e) => println!("Failed to save picture: {}", e),
-                }
-            }
-            Err(e) => println!("Failed to decode image: {}", e),
-        },
-        Err(e) => {
-            println!("Failed to read image dimensions: {}", e);
-        }
-    }
-
-    let picture = PictureBlock {
-        picture_type,
-        media_type: media_type.to_string(),
-        description_length,
-        width,
-        height,
-        color_depth,
-        colors_used,
-        picture_data_length,
-    };
-
-    println!("{:#?}", picture);
+    Ok((is_last, block_type, length))
 }
 
 fn process_metadata(file: &mut File) -> io::Result<()> {
@@ -214,7 +128,7 @@ fn process_metadata(file: &mut File) -> io::Result<()> {
     6	Picture
     */
     loop {
-        let (is_last, block_type, length) = get_header(file);
+        let (is_last, block_type, length) = get_header(file)?;
 
         // пока работает только обработка блока картинки
         match block_type {
@@ -222,7 +136,7 @@ fn process_metadata(file: &mut File) -> io::Result<()> {
             6 => {
                 let mut buffer = vec![0u8; length as usize];
                 file.read_exact(&mut buffer)?;
-                process_picture_block(buffer);
+                picture::PictureBlock::process_picture_block(buffer);
             }
             _ => {
                 // пропускаем остальные блоки
@@ -238,13 +152,21 @@ fn process_metadata(file: &mut File) -> io::Result<()> {
 }
 
 fn main() {
-    let path = "song.flac";
+
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() < 2 {
+        eprintln!("Usage: cargo run <flac_file>");
+        return;
+    }
+
+    let path = &args[1];
 
     let mut file = File::open(path).unwrap();
 
-    check_flac_header(&mut file);
+    check_flac_header(&mut file).expect("Error validating flac header");
 
-    let streaminfo_header = get_header(&mut file);
+    let streaminfo_header = get_header(&mut file).expect("Error get_header!");
 
     // первый всегда идет STREAMINFO
     // поменять потом с индексов на именованные поля
