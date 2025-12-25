@@ -2,7 +2,6 @@ use std::io::Cursor;
 
 use image::ImageReader;
 
-
 #[derive(Debug)]
 pub struct PictureBlock {
     pub picture_type: u32,
@@ -23,14 +22,16 @@ impl PictureBlock {
         let picture_type = u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
         step += 4;
 
-        let media_type_length = u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
+        let media_type_length =
+            u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
         step += 4;
 
         let media_type =
             std::str::from_utf8(&picture_block[step..step + media_type_length as usize]).unwrap();
         step += media_type_length as usize;
 
-        let description_length = u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
+        let description_length =
+            u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
         step += 4;
         step += description_length as usize;
 
@@ -42,7 +43,8 @@ impl PictureBlock {
         step += 4;
         let colors_used = u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
         step += 4;
-        let picture_data_length = u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
+        let picture_data_length =
+            u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
         step += 4;
         let picture_data = &picture_block[step..step + picture_data_length as usize];
 
@@ -92,4 +94,3 @@ impl PictureBlock {
         println!("{:#?}", picture);
     }
 }
-

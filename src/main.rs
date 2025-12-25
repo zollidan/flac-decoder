@@ -4,7 +4,7 @@
 
 use std::env;
 use std::fs::File;
-use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom};
+use std::io::{self, BufReader, Read, Seek, SeekFrom};
 
 use bitstream_io::{BigEndian, BitRead, BitReader};
 
@@ -29,8 +29,10 @@ pub struct Frame {
     pub subframes: Vec<Subframe>,
 }
 
+struct SubframeHeader {}
+
 pub struct Subframe {
-    // данные субфрейма
+    subframe_header: SubframeHeader,
 }
 
 #[derive(Debug)]
@@ -151,8 +153,68 @@ fn process_metadata(file: &mut File) -> io::Result<()> {
     Ok(())
 }
 
-fn main() {
+// функция для поиска количества битов, отведенных под убитые биты
+// хорошо бы потом сделать -> Result<u32, std::io::Error>
+fn find_wasted_bits(reader: &mut BitReader<BufReader<File>, BigEndian>) -> u32 {
+    let wasted_bits_flag = reader.read::<1, u8>().unwrap();
+    let mut k = 0;
+    if wasted_bits_flag == 1 {
+        while reader.read::<1, u8>().unwrap() == 0 {
+            k += 1;
+        }
+        k += 1;
+    };
 
+    k
+}
+
+fn constant_value() {}
+
+fn verbatim() {}
+
+fn fixed_prediction(
+    reader: &mut BitReader<BufReader<File>, BigEndian>,
+    order: u8,
+    bps: u8,
+    block_size: u32,
+) -> Vec<u64> {
+    // создаю вектор для хранения сэмплов в подфрейме
+    let mut samples = vec![0u64; block_size as usize];
+
+    // в длину порядка читаю прогревочные семплы
+    // заменить 16 на bps -> bits per sample
+    // !!!!
+    for i in 0..order as usize {
+        samples[i] = reader.read::<16, u64>().unwrap();
+    }
+
+    // декодирую residual он же остаток
+    let residual = decode_rice_residual(reader, order, block_size);
+
+    for n in order as usize..block_size as usize {
+        let prediction = match order {
+            // 0
+            0 => 0,
+            // a(n-1)
+            1 => samples[n - 1],
+            // 2 * a(n-1) - a(n-2)
+            2 => 2 * samples[n - 1] - samples[n - 2],
+            // 3 * a(n-1) - 3 * a(n-2) + a(n-3)
+            3 => 3 * samples[n - 1] - 3 * samples[n - 2] + samples[n - 3],
+            // 4 * a(n-1) - 6 * a(n-2) + 4 * a(n-3) - a(n -4)
+            4 => 4 * samples[n - 1] - 6 * samples[n - 2] + 4 * samples[n - 3] - samples[n - 4],
+            _ => unreachable!(),
+        };
+    }
+
+    samples
+}
+
+fn decode_rice_residual() {}
+
+fn lpc() {}
+
+fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
@@ -330,7 +392,7 @@ fn main() {
         block_size = reader.read::<16, u16>().unwrap() + 1;
     }
 
-    // дочитываем sample_rate если нужно
+    // дочитываю sample_rate если нужно
     // переместить в отдельную функцию потом
     // лучше бы вообще в impl
     if sample_rate_bits == 0b1100 {
@@ -356,6 +418,24 @@ fn main() {
         block_size,
         crc8,
     };
-
     println!("{:#?}", frame_header);
+
+    println!("Subframe count: {}", steam_info.channels);
+
+    let _ = reader.read::<1, u8>().unwrap();
+    let subframe_type = reader.read::<6, u8>().unwrap();
+
+    // получение типа и порядка
+    let (subframe_kind, order) = match subframe_type {
+        0b000000 => ("Constant", 0),
+        0b000001 => ("Verbatim", 0),
+        0b000010..=0b001111 => ("Fixed", subframe_type - 0x08),
+        0b010000..=0b111111 => ("LPC", subframe_type - 0x20),
+        _ => panic!("Invalid subframe type"),
+    };
+
+    println!("Subframe type: {}, order: {}", subframe_kind, order);
+
+    // вызов конкретных функций декодирования в зависимости от типа сабфрейма
+    // может быть добавить в последний match
 }
