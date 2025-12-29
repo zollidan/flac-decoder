@@ -1,4 +1,5 @@
-use std::{fs::File, io::Read};
+use std::{fs::File, io::{self, Read}};
+use super::blocks::get_header;
 
 #[derive(Debug)]
 pub struct StreamInfo {
@@ -38,8 +39,8 @@ impl StreamInfo {
         }
     }
 
-    pub fn process_stream_info_block(file: &mut File) {
-            let streaminfo_header = get_header(file).expect("Error get_header!");
+    pub fn process_stream_info_block(file: &mut File) -> StreamInfo {
+        let streaminfo_header = get_header(file).expect("Error get_header!");
 
         // первый всегда идет STREAMINFO
         // поменять потом с индексов на именованные поля
@@ -86,23 +87,19 @@ impl StreamInfo {
         );
 
         println!("{:#?}", steam_info);
+
+        steam_info
     }
+}
 
-    fn get_header(file: &mut File) -> Result<(bool, u8, u32), std::io::Error> {
-        let mut header = [0u8; 4];
-        file.read_exact(&mut header)?;
-
-        // побитовая операция
-        // первый бит 0 или 1 если 0 то это не последний блок метаданных
-        // следующие 7 бит - тип блока 0 - STREAMINFO 1 - PADDING и тд
-        let is_last = (header[0] & 0x80) != 0;
-        let block_type = header[0] & 0x7F;
-
-        // следующие 3 байта - длина блока метаданных
-        // собираю 24 бита из 3 байт
-        // сдвигаю первый байт на 16 бит влево, второй на 8 бит и добавляю третий
-        let length = ((header[1] as u32) << 16) | ((header[2] as u32) << 8) | (header[3] as u32);
-
-        Ok((is_last, block_type, length))
+pub fn check_flac_header(file: &mut File) -> io::Result<()> {
+    let mut format_part = [0u8; 4];
+    file.read_exact(&mut format_part)?;
+    if &format_part != b"fLaC" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Not a FLAC file",
+        ));
     }
+    Ok(())
 }

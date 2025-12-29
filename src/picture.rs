@@ -1,5 +1,4 @@
 use std::io::Cursor;
-
 use image::ImageReader;
 
 #[derive(Debug)]

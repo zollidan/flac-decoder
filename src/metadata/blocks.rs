@@ -1,5 +1,5 @@
 use std::{fs::File, io::{self, Read, Seek, SeekFrom}};
-
+use crate::picture;
 
 pub fn get_header(file: &mut File) -> Result<(bool, u8, u32), std::io::Error> {
     let mut header = [0u8; 4];

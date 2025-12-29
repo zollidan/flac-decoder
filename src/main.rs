@@ -4,154 +4,17 @@
 
 use std::env;
 use std::fs::File;
-use std::io::{self, BufReader, Read, Seek, SeekFrom};
+use std::io::BufReader;
 
 use bitstream_io::{BigEndian, BitRead, BitReader};
 
-mod stream_info;
+mod metadata;
+mod frame;
 mod picture;
-mod metedata_blocks;
 
-#[derive(Debug)]
-pub struct FrameHeader {
-    pub sync_code: u16,
-    pub blocking_strategy: u8,
-    pub block_size_code: u8,
-    pub sample_rate: f32,
-    pub channel_assignment: String,
-    pub bit_depth: u32,
-    pub mandatory: u8,
-    pub frame_or_sample_number: u64,
-    pub block_size: u16,
-    pub crc8: u8,
-}
-
-pub struct Frame {
-    pub header: FrameHeader,
-    pub subframes: Vec<Subframe>,
-}
-
-struct SubframeHeader {}
-
-pub struct Subframe {
-    subframe_header: SubframeHeader,
-}
-
-// функция для чтения переменной длины UTF-8 закодированного u64
-fn read_utf8_u64<R: Read>(reader: &mut BitReader<R, BigEndian>) -> std::io::Result<u64> {
-    let mut val = reader.read::<8, u8>()? as u64;
-    let mut mask = 0x80;
-    let mut len = 0;
-
-    // определяем количество дополнительных байт по количеству ведущих единиц
-    while (val & mask) != 0 {
-        len += 1;
-        mask >>= 1;
-    }
-
-    if len == 1 || len > 7 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "Invalid UTF-8 sequence",
-        ));
-    }
-
-    if len == 0 {
-        return Ok(val); // число < 128
-    }
-
-    // оставляем только полезные биты из первого байта
-    val &= mask - 1;
-
-    for _ in 0..(len - 1) {
-        let byte = reader.read::<8, u8>()? as u64;
-        if (byte & 0xC0) != 0x80 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Invalid UTF-8 continuation",
-            ));
-        }
-        val = (val << 6) | (byte & 0x3F);
-    }
-
-    Ok(val)
-}
-
-fn check_flac_header(file: &mut File) -> io::Result<()> {
-    let mut format_part = [0u8; 4];
-    file.read_exact(&mut format_part)?;
-    if &format_part != b"fLaC" {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Not a FLAC file",
-        ));
-    }
-    Ok(())
-}
-
-// функция для поиска количества битов, отведенных под убитые биты
-// хорошо бы потом сделать -> Result<u32, std::io::Error>
-fn find_wasted_bits(reader: &mut BitReader<BufReader<File>, BigEndian>) -> u32 {
-    let wasted_bits_flag = reader.read::<1, u8>().unwrap();
-    let mut k = 0;
-    if wasted_bits_flag == 1 {
-        while reader.read::<1, u8>().unwrap() == 0 {
-            k += 1;
-        }
-        k += 1;
-    };
-
-    k
-}
-
-fn constant_value() {}
-
-fn verbatim() {}
-
-fn fixed_prediction(
-    reader: &mut BitReader<BufReader<File>, BigEndian>,
-    order: u8,
-    bps: u8,
-    block_size: u32,
-) -> Vec<u64> {
-    // создаю вектор для хранения сэмплов в подфрейме
-    let mut samples = vec![0u64; block_size as usize];
-
-    // в длину порядка читаю прогревочные семплы
-    // заменить 16 на bps -> bits per sample
-    // !!!!
-    for i in 0..order as usize {
-        // плюс перевести на signed 
-        samples[i] = reader.read::<16, u64>().unwrap();
-    }
-
-    // декодирую residual он же остаток
-    let residual = decode_rice_residual(reader, order, block_size);
-
-    // применяю предсказание для каждого сэмпла начиная с order до конца блока
-    // тест для работы с индексами вектора так как при n = 0 будет ошибка
-    for n in order as usize..block_size as usize {
-        let prediction = match order {
-            // 0
-            0 => 0,
-            // a(n-1)
-            1 => samples[n - 1],
-            // 2 * a(n-1) - a(n-2)
-            2 => 2 * samples[n - 1] - samples[n - 2],
-            // 3 * a(n-1) - 3 * a(n-2) + a(n-3)
-            3 => 3 * samples[n - 1] - 3 * samples[n - 2] + samples[n - 3],
-            // 4 * a(n-1) - 6 * a(n-2) + 4 * a(n-3) - a(n -4)
-            4 => 4 * samples[n - 1] - 6 * samples[n - 2] + 4 * samples[n - 3] - samples[n - 4],
-            _ => unreachable!(),
-        };
-    }
-
-    samples
-}
-
-fn decode_rice_residual() {}
-
-fn lpc() {}
+use metadata::stream_info::{self, StreamInfo};
+use metadata::blocks;
+use frame::header::{FrameHeader, read_utf8_u64};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -165,11 +28,11 @@ fn main() {
 
     let mut file = File::open(path).unwrap();
 
-    check_flac_header(&mut file).expect("Error validating flac header");
+    stream_info::check_flac_header(&mut file).expect("Error validating flac header");
 
-    stream_info::StreamInfo::process_stream_info_block(&mut file);
+    let steam_info = StreamInfo::process_stream_info_block(&mut file);
 
-    metedata_blocks::process_metadata(&mut file).unwrap();
+    blocks::process_metadata(&mut file).unwrap();
 
     // открытие битового ридера для чтения аудио фреймов из буфера файла
     let mut reader = BitReader::endian(BufReader::new(file), BigEndian);
