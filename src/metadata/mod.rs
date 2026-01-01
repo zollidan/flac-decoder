@@ -1,2 +1,2 @@
-pub mod stream_info;
 pub mod blocks;
+pub mod stream_info;

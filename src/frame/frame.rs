@@ -1,4 +1,4 @@
-use super::header::FrameHeader;
+use super::frame_header::FrameHeader;
 use super::subframe::Subframe;
 
 pub struct Frame {

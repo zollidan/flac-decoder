@@ -1,6 +1,6 @@
+use bitstream_io::{BigEndian, BitRead, BitReader};
 use std::fs::File;
 use std::io::BufReader;
-use bitstream_io::{BigEndian, BitRead, BitReader};
 
 struct SubframeHeader {}
 

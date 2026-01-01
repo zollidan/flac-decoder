@@ -1,5 +1,8 @@
-use std::{fs::File, io::{self, Read}};
 use super::blocks::get_header;
+use std::{
+    fs::File,
+    io::{self, Read},
+};
 
 #[derive(Debug)]
 pub struct StreamInfo {
