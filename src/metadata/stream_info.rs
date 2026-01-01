@@ -18,29 +18,6 @@ pub struct StreamInfo {
 }
 
 impl StreamInfo {
-    pub fn new(
-        min_block_size: u16,
-        max_block_size: u16,
-        min_frame_size: u32,
-        max_frame_size: u32,
-        sample_rate: u64,
-        channels: u8,
-        bps: u8,
-        total_samples: u64,
-        checksum_combined: [u8; 16],
-    ) -> Self {
-        StreamInfo {
-            min_block_size,
-            max_block_size,
-            min_frame_size,
-            max_frame_size,
-            sample_rate,
-            channels,
-            bps,
-            total_samples,
-            checksum_combined,
-        }
-    }
 
     pub fn process_stream_info_block(file: &mut File) -> StreamInfo {
         let streaminfo_header = get_header(file).expect("Error get_header!");
@@ -77,21 +54,18 @@ impl StreamInfo {
         // все что осталось забираю маской
         let total_samples = combinated & 0xFFFFFFFFF; // 36 bit
 
-        let steam_info = StreamInfo::new(
+        Self {
             min_block_size,
             max_block_size,
             min_frame_size,
             max_frame_size,
             sample_rate,
-            channels as u8,
-            bps as u8,
+            channels: channels as u8,
+            bps: bps as u8,
             total_samples,
             checksum_combined,
-        );
-
-        println!("{:#?}", steam_info);
-
-        steam_info
+        }
+        
     }
 }
 

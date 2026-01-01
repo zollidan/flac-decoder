@@ -150,7 +150,7 @@ impl FrameHeader {
         // CRC-8
         let crc8 = reader.read::<8, u8>().unwrap();
 
-        let frame_header = FrameHeader {
+        Self {
             sync_code,
             blocking_strategy,
             block_size_code: block_size_bits,
@@ -162,7 +162,6 @@ impl FrameHeader {
             block_size,
             crc8,
         };
-        println!("{:#?}", frame_header);
     }
 }
 

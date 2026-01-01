@@ -86,7 +86,7 @@ impl PictureBlock {
             }
         }
 
-        let picture = PictureBlock {
+        Self {
             picture_type,
             media_type: media_type.to_string(),
             description_length,
@@ -97,7 +97,6 @@ impl PictureBlock {
             picture_data_length,
         };
 
-        println!("{:#?}", picture);
     }
 }
 
