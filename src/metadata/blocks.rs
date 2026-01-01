@@ -20,7 +20,7 @@ pub struct PictureBlock {
 
 impl PictureBlock {
     // получение и сохранение картинки из метаданных
-    pub fn process_picture_block(picture_block: Vec<u8>) {
+    pub fn process_picture_block(picture_block: Vec<u8>, save_cover: bool) {
         let mut step = 0;
 
         let picture_type = u32::from_be_bytes(picture_block[step..step + 4].try_into().unwrap());
@@ -52,35 +52,37 @@ impl PictureBlock {
         step += 4;
         let picture_data = &picture_block[step..step + picture_data_length as usize];
 
-        // сохранение картинки в файл
-        let file_name = format!(
-            "picture_{}.{}",
-            picture_type,
-            match media_type {
-                "image/jpeg" => "jpg",
-                "image/png" => "png",
-                _ => "bin",
-            }
-        );
-
-        let cursor = Cursor::new(picture_data);
-
-        match ImageReader::new(cursor).with_guessed_format() {
-            Ok(reader) => match reader.decode() {
-                Ok(image) => {
-                    if width == 0 || height == 0 {
-                        width = image.width();
-                        height = image.height();
-                    }
-                    match image.save(&file_name) {
-                        Ok(_) => println!("Saved picture to {}", file_name),
-                        Err(e) => println!("Failed to save picture: {}", e),
-                    }
+        // сохранение картинки в файл только если указан флаг
+        if save_cover {
+            let file_name = format!(
+                "picture_{}.{}",
+                picture_type,
+                match media_type {
+                    "image/jpeg" => "jpg",
+                    "image/png" => "png",
+                    _ => "bin",
                 }
-                Err(e) => println!("Failed to decode image: {}", e),
-            },
-            Err(e) => {
-                println!("Failed to read image dimensions: {}", e);
+            );
+
+            let cursor = Cursor::new(picture_data);
+
+            match ImageReader::new(cursor).with_guessed_format() {
+                Ok(reader) => match reader.decode() {
+                    Ok(image) => {
+                        if width == 0 || height == 0 {
+                            width = image.width();
+                            height = image.height();
+                        }
+                        match image.save(&file_name) {
+                            Ok(_) => println!("Saved picture to {}", file_name),
+                            Err(e) => println!("Failed to save picture: {}", e),
+                        }
+                    }
+                    Err(e) => println!("Failed to decode image: {}", e),
+                },
+                Err(e) => {
+                    println!("Failed to read image dimensions: {}", e);
+                }
             }
         }
 
@@ -117,7 +119,7 @@ pub fn get_header(file: &mut File) -> Result<(bool, u8, u32), std::io::Error> {
     Ok((is_last, block_type, length))
 }
 
-pub fn process_metadata(file: &mut File) -> io::Result<()> {
+pub fn process_metadata(file: &mut File, save_cover: bool) -> io::Result<()> {
     // скип остальных блоков метаданных
     /*
     0	Streaminfo
@@ -137,7 +139,7 @@ pub fn process_metadata(file: &mut File) -> io::Result<()> {
             6 => {
                 let mut buffer = vec![0u8; length as usize];
                 file.read_exact(&mut buffer)?;
-                PictureBlock::process_picture_block(buffer);
+                PictureBlock::process_picture_block(buffer, save_cover);
             }
             _ => {
                 // пропускаем остальные блоки
