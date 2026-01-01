@@ -19,8 +19,8 @@ pub struct StreamInfo {
 
 impl StreamInfo {
 
-    pub fn process_stream_info_block(file: &mut File) -> StreamInfo {
-        let streaminfo_header = get_header(file).expect("Error get_header!");
+    pub fn process_stream_info_block<R: Read>(reader: &mut R) -> StreamInfo {
+        let streaminfo_header = get_header(reader).expect("Error get_header!");
 
         // первый всегда идет STREAMINFO
         // поменять потом с индексов на именованные поля
@@ -30,7 +30,7 @@ impl StreamInfo {
 
         // создаю вектор в длину блока и читаю его содержимое
         let mut streaminfo = vec![0u8; streaminfo_header.2 as usize];
-        file.read_exact(&mut streaminfo).unwrap();
+        reader.read_exact(&mut streaminfo).unwrap();
 
         // чтение информация из STREAMINFO
         // собираю значения из байт массива согласно докам
@@ -60,18 +60,17 @@ impl StreamInfo {
             min_frame_size,
             max_frame_size,
             sample_rate,
-            channels: channels as u8,
-            bps: bps as u8,
+            channels: (channels + 1) as u8,
+            bps: (bps + 1) as u8,        
             total_samples,
             checksum_combined,
         }
-        
     }
 }
 
-pub fn check_flac_header(file: &mut File) -> io::Result<()> {
+pub fn check_flac_header<R: Read>(reader: &mut R) -> io::Result<()> {
     let mut format_part = [0u8; 4];
-    file.read_exact(&mut format_part)?;
+    reader.read_exact(&mut format_part)?;
     if &format_part != b"fLaC" {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -79,4 +78,78 @@ pub fn check_flac_header(file: &mut File) -> io::Result<()> {
         ));
     }
     Ok(())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "Expect STREAMINFO (type 0)")] // должна случиться паника
+    fn test_process_stream_info_block_invalid_header() {
+        // данные -> [неправильный тип padding 1, длина 0, 0, 1]
+        let mut data = Cursor::new(vec![
+            0x01, 0x00, 0x00, 0x01, 0x00
+        ]);
+        
+        StreamInfo::process_stream_info_block(&mut data);
+    }
+
+    #[test]
+    fn test_process_stream_info_block_full_check() {
+        let mut data = Vec::new();
+
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x22]);
+        data.extend_from_slice(&[0x10, 0x00]);
+        data.extend_from_slice(&[0x10, 0x00]);
+        data.extend_from_slice(&[0x00, 0x00, 0x01]);
+        data.extend_from_slice(&[0x00, 0x00, 0x02]);
+
+        let sample_rate: u64 = 44100;
+        let channels: u64 = 2;
+        let bps: u64 = 15; 
+        let total_samples: u64 = 1000;
+
+        let combined: u64 = (sample_rate << 44) 
+                        | (channels << 41) 
+                        | (bps << 36) 
+                        | total_samples;
+        
+        data.extend_from_slice(&combined.to_be_bytes());
+
+        // MD5 (16 байт)
+        let md5 = [0xAB; 16];
+        data.extend_from_slice(&md5);
+
+        // проверка
+        let mut reader = Cursor::new(data);
+        let info = StreamInfo::process_stream_info_block(&mut reader);
+
+    }
+
+    #[test]
+    fn test_check_flac_header_valid() {
+        let mut data = Cursor::new("fLaCotherdataidkrandom");
+        let result = check_flac_header(&mut data);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_flac_header_invalid() {
+        let mut data = Cursor::new("NotFLACdatahere");
+        let result = check_flac_header(&mut data);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn test_check_flac_header_too_short() {
+        let mut data = Cursor::new("fLa");
+        let result = check_flac_header(&mut data);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
+    }
 }

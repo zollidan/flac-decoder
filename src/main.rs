@@ -40,6 +40,8 @@ fn main() {
 
     let stream_info = StreamInfo::process_stream_info_block(&mut file);
 
+    println!("Stream Info: {:#?}", stream_info);
+
     blocks::process_metadata(&mut file, args.save_cover).expect("Failed to process metadata");
 
     // открытие битового ридера для чтения аудио фреймов из буфера файла

@@ -100,9 +100,9 @@ impl PictureBlock {
     }
 }
 
-pub fn get_header(file: &mut File) -> Result<(bool, u8, u32), std::io::Error> {
+pub fn get_header<R: Read>(reader: &mut R) -> Result<(bool, u8, u32), std::io::Error> {
     let mut header = [0u8; 4];
-    file.read_exact(&mut header)?;
+    reader.read_exact(&mut header)?;
 
     // побитовая операция
     // первый бит 0 или 1 если 0 то это не последний блок метаданных
