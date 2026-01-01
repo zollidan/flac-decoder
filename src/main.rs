@@ -50,7 +50,9 @@ fn main() {
     frame_header::FrameHeader::read_frame_header(&mut reader, stream_info);
 
     let _ = reader.read::<1, u8>().expect("Failed to read reserved bit");
-    let subframe_type = reader.read::<6, u8>().expect("Failed to read subframe type");
+    let subframe_type = reader
+        .read::<6, u8>()
+        .expect("Failed to read subframe type");
 
     // получение типа и порядка
     let (subframe_kind, order) = match subframe_type {

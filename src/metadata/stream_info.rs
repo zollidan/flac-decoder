@@ -1,8 +1,5 @@
 use super::blocks::get_header;
-use std::{
-    fs::File,
-    io::{self, Read},
-};
+use std::io::{self, Read};
 
 #[derive(Debug)]
 pub struct StreamInfo {
@@ -18,7 +15,6 @@ pub struct StreamInfo {
 }
 
 impl StreamInfo {
-
     pub fn process_stream_info_block<R: Read>(reader: &mut R) -> StreamInfo {
         let streaminfo_header = get_header(reader).expect("Error get_header!");
 
@@ -45,14 +41,14 @@ impl StreamInfo {
         let combinated = u64::from_be_bytes(streaminfo[10..18].try_into().unwrap());
         // получение 16 байт контрольной суммы MD5
         let checksum_combined: [u8; 16] = streaminfo[18..34].try_into().unwrap();
-        // так как значение занимает 20 то сдвигаю на 12 бита вправо от 32 и маской беру 20 бит
+        // так как значение занимает 20 то сдвигаю на 44 бита вправо и маской беру 20 бит
         let sample_rate = (combinated >> 44) & 0xFFFFF; // 20 bit
-        // сдвигаю от 32 на 9 бит и маской беру 3 бита
+        // сдвигаю на 41 бит и маской беру 3 бита
         let channels = (combinated >> 41) & 0x7; // 3 bit
-        // сдвигаю от 32 на 4 бит и маской беру 5 бит
+        // сдвигаю на 36 бит и маской беру 5 бит
         let bps = (combinated >> 36) & 0x1F; // 5 bit
-        // все что осталось забираю маской
-        let total_samples = combinated & 0xFFFFFFFFF; // 36 bit
+        // все что осталось забираю маской - 0xF_FFFF_FFFF
+        let total_samples = combinated & 0xF_FFFF_FFFF; // 36 bit
 
         Self {
             min_block_size,
@@ -61,7 +57,7 @@ impl StreamInfo {
             max_frame_size,
             sample_rate,
             channels: (channels + 1) as u8,
-            bps: (bps + 1) as u8,        
+            bps: (bps + 1) as u8,
             total_samples,
             checksum_combined,
         }
@@ -80,7 +76,6 @@ pub fn check_flac_header<R: Read>(reader: &mut R) -> io::Result<()> {
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
@@ -91,10 +86,8 @@ mod tests {
     #[should_panic(expected = "Expect STREAMINFO (type 0)")] // должна случиться паника
     fn test_process_stream_info_block_invalid_header() {
         // данные -> [неправильный тип padding 1, длина 0, 0, 1]
-        let mut data = Cursor::new(vec![
-            0x01, 0x00, 0x00, 0x01, 0x00
-        ]);
-        
+        let mut data = Cursor::new(vec![0x01, 0x00, 0x00, 0x01, 0x00]);
+
         StreamInfo::process_stream_info_block(&mut data);
     }
 
@@ -102,22 +95,24 @@ mod tests {
     fn test_process_stream_info_block_full_check() {
         let mut data = Vec::new();
 
+        // STREAMINFO header (type 0, length 34)
         data.extend_from_slice(&[0x00, 0x00, 0x00, 0x22]);
+        // min block size (2 байта)
         data.extend_from_slice(&[0x10, 0x00]);
+        // max block size (2 байта)
         data.extend_from_slice(&[0x10, 0x00]);
+        // min frame size (3 байта)
         data.extend_from_slice(&[0x00, 0x00, 0x01]);
+        // max frame size (3 байта)
         data.extend_from_slice(&[0x00, 0x00, 0x02]);
 
         let sample_rate: u64 = 44100;
         let channels: u64 = 2;
-        let bps: u64 = 15; 
+        let bps: u64 = 15;
         let total_samples: u64 = 1000;
 
-        let combined: u64 = (sample_rate << 44) 
-                        | (channels << 41) 
-                        | (bps << 36) 
-                        | total_samples;
-        
+        let combined: u64 = (sample_rate << 44) | (channels << 41) | (bps << 36) | total_samples;
+
         data.extend_from_slice(&combined.to_be_bytes());
 
         // MD5 (16 байт)
@@ -128,6 +123,15 @@ mod tests {
         let mut reader = Cursor::new(data);
         let info = StreamInfo::process_stream_info_block(&mut reader);
 
+        assert_eq!(info.min_block_size, 0x1000);
+        assert_eq!(info.max_block_size, 0x1000);
+        assert_eq!(info.min_frame_size, 1);
+        assert_eq!(info.max_frame_size, 2);
+        assert_eq!(info.sample_rate, 44100);
+        assert_eq!(info.channels, 3); // channels + 1 = 2 + 1 = 3
+        assert_eq!(info.bps, 16); // bps + 1 = 15 + 1 = 16
+        assert_eq!(info.total_samples, 1000);
+        assert_eq!(info.checksum_combined, [0xAB; 16]);
     }
 
     #[test]

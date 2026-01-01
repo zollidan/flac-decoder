@@ -206,3 +206,44 @@ pub fn read_utf8_u64<R: Read>(reader: &mut BitReader<R, BigEndian>) -> std::io::
 
     Ok(val)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_read_utf8_u64_table() {
+        // Таблица: (входные байты, ожидаемый результат или ошибка)
+        let cases = vec![
+            (vec![0x00], Ok(0)),                     // минимально 1 байт
+            (vec![0x7F], Ok(127)),                  // максимально 1 байт
+            (vec![0xC2, 0x80], Ok(128)),            // минимально 2 байта
+            (vec![0xE2, 0x82, 0xAC], Ok(0x20AC)),   // символы евро (3 байта)
+            (vec![0b10000000], Err("Invalid UTF-8 sequence")), // начинается с 10...
+            (vec![0xC2, 0x41], Err("Invalid UTF-8 continuation")), // бита продолжения нет (0x41 = 'A')
+        ];
+
+        for (data, expected) in cases {
+            let mut reader = BitReader::endian(&data[..], BigEndian);
+            let result = read_utf8_u64(&mut reader);
+
+            match expected {
+                Ok(expected_val) => {
+                    assert_eq!(
+                        result.unwrap(), 
+                        expected_val, 
+                        "Error input data: {:?}", data
+                    );
+                }
+                Err(err_msg) => {
+                    let err = result.unwrap_err();
+                    assert_eq!(
+                        err.to_string(), 
+                        err_msg, 
+                        "Expected error '{}', but data {:?} passed", err_msg, data
+                    );
+                }
+            }
+        }
+    }
+}
