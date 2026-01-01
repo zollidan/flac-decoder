@@ -14,7 +14,7 @@ mod metadata;
 use metadata::blocks;
 use metadata::stream_info::{self, StreamInfo};
 
-use crate::frame::frame_header;
+use crate::frame::{frame_header, subframe};
 
 /// FLAC decoder with metadata extraction
 #[derive(Parser, Debug)]
@@ -47,7 +47,7 @@ fn main() {
     // открытие битового ридера для чтения аудио фреймов из буфера файла
     let mut reader = BitReader::endian(BufReader::new(file), BigEndian);
 
-    frame_header::FrameHeader::read_frame_header(&mut reader, stream_info);
+    let frame_header = frame_header::FrameHeader::read_frame_header(&mut reader, stream_info);
 
     let _ = reader.read::<1, u8>().expect("Failed to read reserved bit");
     let subframe_type = reader
@@ -55,13 +55,14 @@ fn main() {
         .expect("Failed to read subframe type");
 
     // получение типа и порядка
-    let (subframe_kind, order) = match subframe_type {
-        0b000000 => ("Constant", 0),
-        0b000001 => ("Verbatim", 0),
-        0b000010..=0b001111 => ("Fixed", subframe_type - 0x08),
-        0b010000..=0b111111 => ("LPC", subframe_type - 0x20),
+    match subframe_type {
+        0b000000 => {
+            let sample = subframe::constant_value(reader, &frame_header, true).expect("Error parsing const value");
+        },
+        // 0b000001 => ("Verbatim", 0),
+        // 0b000010..=0b001111 => ("Fixed", subframe_type - 0x08),
+        // 0b010000..=0b111111 => ("LPC", subframe_type - 0x20),
         _ => panic!("Invalid subframe type"),
-    };
+    }; 
 
-    println!("Subframe type: {}, order: {}", subframe_kind, order);
 }

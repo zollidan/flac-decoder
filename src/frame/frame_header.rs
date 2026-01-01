@@ -24,7 +24,7 @@ impl FrameHeader {
     pub fn read_frame_header(
         reader: &mut BitReader<BufReader<File>, BigEndian>,
         stream_info: stream_info::StreamInfo,
-    ) {
+    ) -> Self {
         // чтение синхронизирующего кода из аудио фрейма
         // 14 бит (не 15!)
         // всегда должно быть 0b11111111111110
@@ -150,7 +150,7 @@ impl FrameHeader {
         // CRC-8
         let crc8 = reader.read::<8, u8>().unwrap();
 
-        let frame_header = Self {
+        Self {
             sync_code,
             blocking_strategy,
             block_size_code: block_size_bits,
@@ -161,9 +161,7 @@ impl FrameHeader {
             frame_or_sample_number,
             block_size,
             crc8,
-        };
-
-        println!("{:#?}", frame_header);
+        }
     }
 }
 
