@@ -1,7 +1,4 @@
-use std::{
-    fs::File,
-    io::{self, Read, Seek, SeekFrom},
-};
+use std::io::{self, Read, Seek, SeekFrom};
 
 use image::ImageReader;
 use std::io::Cursor;
@@ -169,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_header_invalid(){
+    fn test_get_header_invalid() {
         let data = vec![0b10000110, 0x00]; // мало данных
         let mut cursor = Cursor::new(data);
 
@@ -199,10 +196,10 @@ mod tests {
 
     //     // блок Picture: is_last=true, type=6, length=2
     //     data.extend_from_slice(&[0x86, 0x00, 0x00, 0x02]);
-    //     data.extend_from_slice(&[0xFF, 0xFF]); 
+    //     data.extend_from_slice(&[0xFF, 0xFF]);
 
     //     let mut cursor = Cursor::new(data);
-    
+
     //     let result = process_metadata(&mut cursor, false);
 
     //     assert!(result.is_ok());
