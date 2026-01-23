@@ -1,7 +1,7 @@
 use bitstream_io::{BigEndian, BitRead, BitReader};
 use std::{
     fs::File,
-    io::{BufReader, Read},
+    io::{BufReader, Error, ErrorKind, Read},
 };
 
 use crate::metadata::stream_info;
@@ -23,14 +23,21 @@ pub struct FrameHeader {
 impl FrameHeader {
     pub fn read_frame_header(
         reader: &mut BitReader<BufReader<File>, BigEndian>,
-        stream_info: stream_info::StreamInfo,
-    ) -> Self {
+        stream_info: &stream_info::StreamInfo,
+    ) -> Result<Self, std::io::Error> {
         // чтение синхронизирующего кода из аудио фрейма
         // 14 бит (не 15!)
         // всегда должно быть 0b11111111111110
-        let sync_code = reader.read::<14, u16>().expect("Sync error");
+        let sync_code = reader.read::<14, u16>()?;
+
         if sync_code != 0x3FFE {
-            panic!("Lost sync");
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                format!(
+                    "Invalid sync code: {:b}, expected 11111111111110",
+                    sync_code
+                ),
+            ));
         }
 
         // 1 бит - reserved
@@ -150,7 +157,7 @@ impl FrameHeader {
         // CRC-8
         let crc8 = reader.read::<8, u8>().unwrap();
 
-        Self {
+        Ok(Self {
             sync_code,
             blocking_strategy,
             block_size_code: block_size_bits,
@@ -161,7 +168,7 @@ impl FrameHeader {
             frame_or_sample_number,
             block_size,
             crc8,
-        }
+        })
     }
 }
 
@@ -213,11 +220,11 @@ mod tests {
     fn test_read_utf8_u64_table() {
         // Таблица: (входные байты, ожидаемый результат или ошибка)
         let cases = vec![
-            (vec![0x00], Ok(0)),                     // минимально 1 байт
-            (vec![0x7F], Ok(127)),                  // максимально 1 байт
-            (vec![0xC2, 0x80], Ok(128)),            // минимально 2 байта
-            (vec![0xE2, 0x82, 0xAC], Ok(0x20AC)),   // символы евро (3 байта)
-            (vec![0b10000000], Err("Invalid UTF-8 sequence")), // начинается с 10...
+            (vec![0x00], Ok(0)),                                   // минимально 1 байт
+            (vec![0x7F], Ok(127)),                                 // максимально 1 байт
+            (vec![0xC2, 0x80], Ok(128)),                           // минимально 2 байта
+            (vec![0xE2, 0x82, 0xAC], Ok(0x20AC)),                  // символы евро (3 байта)
+            (vec![0b10000000], Err("Invalid UTF-8 sequence")),     // начинается с 10...
             (vec![0xC2, 0x41], Err("Invalid UTF-8 continuation")), // бита продолжения нет (0x41 = 'A')
         ];
 
@@ -228,17 +235,20 @@ mod tests {
             match expected {
                 Ok(expected_val) => {
                     assert_eq!(
-                        result.unwrap(), 
-                        expected_val, 
-                        "Error input data: {:?}", data
+                        result.unwrap(),
+                        expected_val,
+                        "Error input data: {:?}",
+                        data
                     );
                 }
                 Err(err_msg) => {
                     let err = result.unwrap_err();
                     assert_eq!(
-                        err.to_string(), 
-                        err_msg, 
-                        "Expected error '{}', but data {:?} passed", err_msg, data
+                        err.to_string(),
+                        err_msg,
+                        "Expected error '{}', but data {:?} passed",
+                        err_msg,
+                        data
                     );
                 }
             }
